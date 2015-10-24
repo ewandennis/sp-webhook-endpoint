@@ -1,0 +1,7 @@
+bower_components
+node_modules
+test/reports
+xunit.xml
+test.js
+npm-debug.log
+.DS_Store

@@ -1,0 +1,24 @@
+{
+  "name": "node-webhook-endpoint",
+  "version": "0.0.1",
+  "description": "SparkPost webhook endpoint convenience module",
+  "main": "webhookendpoint.js",
+  "scripts": {
+    "test": "mocha test/*/"
+  },
+  "keywords": [
+    "SparkPost",
+    "webhook"
+  ],
+  "author": "Ewan Dennis <ewan.dennis@sparkpost.com>",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "chai": "^3.3.0",
+    "mocha": "^2.3.3",
+    "sinon": "^1.17.1",
+    "sinon-chai": "^2.8.0"
+  },
+  "dependencies": {
+    "q": "^1.4.1"
+  }
+}
