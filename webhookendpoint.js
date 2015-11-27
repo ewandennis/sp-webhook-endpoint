@@ -1,34 +1,34 @@
 'use strict';
 
 /*
- * HTTP endpoint intended to receive SparkPost webhook requests.
+ * HTTP endpoint intended to safely receive SparkPost webhook requests
+ * and make them available to client code for processing.
  *
- * This type emits events to allow client code to process webhook event batches.
- *
- * event 'batchReceived':
- *  Arguments: JSON batch (Array)
- *  batchReceived is emitted when a new batch has been received.
  */
 
 var http = require('http')
-  , EventEmitter = require('events')
   , DumbStorageProvider = require('./dumbstorage');
 
 function WebhookEndpoint(storageProvider) {
-  EventEmitter.call(this);
-  this.server = http.createServer(this.processRequest.bind(this));
+  this.maxRetries = 5;
+  this.server = http.createServer(this.receiveBatch.bind(this));
   this.storage = storageProvider || new DumbStorageProvider();
-
-  this.listen = this.server.listen.bind(this.server);
   this.close = this.server.close.bind(this.server);
 }
 
-WebhookEndpoint.prototype.__proto__ = EventEmitter.prototype;
+WebhookEndpoint.prototype.listen = function(port, next) {
+  if (!this.hasOwnProperty('processor')) {
+    throw new Error('WebhookEndpoint#listen() called without a (valid) batch processor function.  See WebhookEndpoint#setBatchProcessor() for details.');
+  }
 
-exports.WebhookEndpoint = WebhookEndpoint;
-exports.DumbStorageProvider = DumbStorageProvider;
+  this.server.listen(port, next);
+};
 
-WebhookEndpoint.prototype.processRequest = function(req, res) {
+WebhookEndpoint.prototype.setBatchProcessor = function(processor) {
+  this.processor = processor;
+};
+
+WebhookEndpoint.prototype.receiveBatch = function(req, res) {
   var self = this
     , reqBlocks = [];
 
@@ -45,36 +45,60 @@ WebhookEndpoint.prototype.processRequest = function(req, res) {
   });
 
   req.on('end', function() {
-    var reqStr = Buffer.concat(reqBlocks).toString('utf8')
-      , reqJSON;
-
-    try {
-      reqJSON = JSON.parse(reqStr);
-    } catch(e) {
-      sendResponse(res, 400, 'Malformed JSON');
-      return;
-    }
-
-    self.consumeBatch(reqJSON, res);
+    var reqStr = Buffer.concat(reqBlocks).toString('utf8');
+    self.validateAndStoreBatch(reqStr, res);
   });
 };
 
-WebhookEndpoint.prototype.consumeBatch = function(batch, res) {
+WebhookEndpoint.prototype.validateAndStoreBatch = function(reqStr, res) {
+  var self = this
+    , batch;
+
+  try {
+    batch = JSON.parse(reqStr);
+  } catch(e) {
+    sendResponse(res, 400, 'Malformed JSON');
+    return;
+  }
+
+  if (!Array.isArray(batch)) {
+    return sendResponse(res, 200, 'ok');
+  }
+
+  self.storage.storeBatch(batch, function(err, batchID) {
+    if (err) {
+      return sendResponse(res, 500, err.message);
+    }
+
+    sendResponse(res, 200, 'ok');
+
+    self.dispatchBatch(batch, batchID, 0);
+  });
+};
+
+WebhookEndpoint.prototype.dispatchBatch = function(batch, batchID, retryCount) {
   var self = this;
-  if (Array.isArray(batch)) {
-    self.storage.storeBatch(batch, function(err) {
-      if (err) {
-        sendResponse(res, 500, err.message);
-        self.emit('error', err);
+  self.processor(batch, function(err) {
+    if (err) {
+      ++retryCount;
+      if (retryCount < self.maxRetries) {
+        return setImmediate(self.dispatchBatch.bind(self, batch, batchID, retryCount));
       } else {
-        sendResponse(res, 200, 'ok');
-        self.emit('batchReceived', self.storage);
+        var throwme = new Error('Dispatch failure: unable to dispatch batch (batchID=' + batchID + '): ' + err);
+        throwme.name = 'DispatchFailure';
+        throwme.batchID = batchID;
+        throw throwme;
+      }
+    }
+
+    self.storage.releaseBatch(batchID, function(err) {
+      if (err) {
+        var throwme = new Error('Inconsistent state: unable to release a consumed batch from storage (batchID=' + batchID + '): ' + err);
+        throwme.name = 'InconsistentState';
+        throw throwme;
       }
     });
-  } else {
-    self.emit('pingReceived', batch);
-    sendResponse(res, 200, 'ok');
-  }
+  });
 };
 
 // ----------------------------------------------------------------------------
@@ -87,3 +111,8 @@ function sendResponse(res, code, msg) {
     msg: msg
   }));
 }
+
+// ----------------------------------------------------------------------------
+
+exports.WebhookEndpoint = WebhookEndpoint;
+exports.DumbStorageProvider = DumbStorageProvider;

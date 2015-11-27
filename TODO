@@ -1,0 +1,11 @@
+*Move to a single nominated batch processor function model
+*Retry releasing a batch N times after successful processing
+Handle failed batches on startup
+Handle buildup of failed batches
+Rework client projects
+Add Mongo storage
+Add Cassandra storage
+Add Postgres storage
+Add filesystem storage
+Use options argument in ctor
+Implement readable stream interface

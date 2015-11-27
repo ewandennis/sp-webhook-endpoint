@@ -13,12 +13,14 @@ function DumbStorageProvider() {
 module.exports = DumbStorageProvider;
 
 DumbStorageProvider.prototype.storeBatch = function(batch, next) {
-  var self = this;
-  self.batches.push({
-    id: self.nextBatchID++,
-    batch: batch
-  });
-  next(null);
+  var self = this
+    , batchrec = {
+      id: self.nextBatchID++,
+      batch: batch
+    };
+
+  self.batches.push(batchrec);
+  next(null, batchrec.id);
 };
 
 DumbStorageProvider.prototype.retrieveBatch = function(next) {
