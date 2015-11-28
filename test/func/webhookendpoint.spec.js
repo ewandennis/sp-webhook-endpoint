@@ -1,6 +1,7 @@
 'use strict';
 
 var http = require('http')
+  , stream = require('stream')
   , q = require('q')
   , chai = require('chai')
   , sinon = require('sinon')
@@ -58,9 +59,6 @@ function Cxt() {
   sinon.stub(self.storage, 'releaseBatch', self.releaseBatch.bind(self));
 
   self.server = new WebhookEndpoint(self.storage);
-
-  self.nullBatchProcessor = sinon.spy(nullBatchProcessor);
-  self.server.setBatchProcessor(self.nullBatchProcessor);
 }
 
 Cxt.prototype.onBatchStored = function(timeout) {
@@ -112,25 +110,39 @@ Cxt.prototype.waitForBatchRelease = function() {
   return this.waitingForBatchPromise.promise;
 };
 
-function nullBatchProcessor(batch, next) {
+function doNothing(batch, next) {
   next();
 }
 
-function badBatchProcessor(batch, next) {
+function throwError(batch, next) {
   next(new Error('Batch processing failed'));
 }
 
-// return a function that calls fnA the first n times it is called,
+// return a writable stream function that calls fnA the first n times it is written to,
 // then calls fnB.
-function nTimesAThenB(n, fnA, fnB) {
+function nTimeAthenBConsumer(n, fnA, fnB) {
   var cnt = 0;
-  return function() {
-    if (cnt < n) {
-      ++cnt;
-      return fnA.apply(null, arguments);
-    }
-    return fnB.apply(null, arguments);
-  };
+  return new stream.Writable({
+    write: sinon.spy(function(chunk, encoding, next) {
+      if (cnt < n) {
+        ++cnt;
+        return fnA.apply(null, arguments);
+      }
+      return fnB.apply(null, arguments);
+    })
+  });
+}
+
+function BadBatchConsumer() {
+  return new stream.Writable({
+    write: sinon.spy(throwError)
+  });
+}
+
+function NullBatchConsumer() {
+  return new stream.Writable({
+    write: sinon.spy(doNothing)
+  });
 }
 
 describe('WebhookEndpoint', function() {
@@ -150,27 +162,37 @@ describe('WebhookEndpoint', function() {
   });
 
   it('should silently consume webhook pings (empty JSON request bodies)', function(done) {
-    this.cxt.server.setBatchProcessor(badBatchProcessor);
     sendJSONRequest({}).done(function() { done(); } );
   });
 
   it('should call its processor function when a legit webhook batch is received', function(done) {
-    var self = this;
+    var self = this
+      , consumer = NullBatchConsumer();
+
+    this.cxt.server.pipe(consumer);
+
     q.allSettled([this.cxt.onBatchStored(), sendJSONRequest(TEST_BATCH)]).then(function() {
-      expect(self.cxt.nullBatchProcessor).to.have.been.calledOnce;
+      expect(consumer.write).to.have.been.calledOnce;
     }).done(done);
   });
 
   it('should use storage.storeBatch() to store a batch after receipt but before calling the processor', function(done) {
-    var self = this;
+    var self = this
+      , consumer = NullBatchConsumer();
+
+    this.cxt.server.pipe(consumer);
+
     q.allSettled([self.cxt.onBatchStored(), sendJSONRequest(TEST_BATCH)]).then(function() {
       expect(self.cxt.storage.storeBatch).to.have.been.called;
-      expect(self.cxt.storage.storeBatch).to.have.been.calledBefore(self.cxt.nullBatchProcessor);
+      expect(self.cxt.storage.storeBatch).to.have.been.calledBefore(consumer.write);
     }).done(done);
   });
 
   it('should release a batch if the processor calls next without an error', function(done) {
     var self = this;
+
+    this.cxt.server.pipe(consumer);
+
     q.allSettled([self.cxt.onBatchStored(), sendJSONRequest(TEST_BATCH)]).then(function() {
       expect(self.cxt.storage.releaseBatch).to.have.been.called;
     }).done(done);
@@ -179,9 +201,10 @@ describe('WebhookEndpoint', function() {
   it('should not release a batch if the processor calls next with an error', function(done) {
     var self = this
       , numFailures = 2
-      , processor = sinon.spy(nTimesAThenB(numFailures, badBatchProcessor, nullBatchProcessor));
+      , consumer = nTimeAthenBConsumer(numFailures, throwError, doNothing);
 
-    this.cxt.server.setBatchProcessor(processor);
+    this.cxt.server.pipe(consumer);
+
     q.allSettled([self.cxt.onBatchStored(), sendJSONRequest(TEST_BATCH)]).then(function() {
       expect(self.cxt.storage.releaseBatch).not.to.have.been.called;
     }).done(done);
@@ -190,11 +213,12 @@ describe('WebhookEndpoint', function() {
   it('should call the processor again with a batch after it fails to dispatch', function(done) {
     var self = this
       , numFailures = 2
-      , processor = sinon.spy(nTimesAThenB(numFailures, badBatchProcessor, nullBatchProcessor));
+      , consumer = nTimeAthenBConsumer(numFailures, throwError, doNothing);
 
-    this.cxt.server.setBatchProcessor(processor);
+    this.cxt.server.pipe(consumer);
+
     q.allSettled([sendJSONRequest(TEST_BATCH), self.cxt.waitForBatchRelease()]).then(function() {
-      expect(processor).to.have.callCount(numFailures+1);
+      expect(consumer.write).to.have.callCount(numFailures+1);
     }).done(done);
   });
 });
