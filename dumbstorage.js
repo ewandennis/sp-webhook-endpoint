@@ -38,3 +38,5 @@ DumbStorageProvider.prototype.releaseBatch = function(id, next) {
   self.batches = self.batches.filter(function(b) { return b.id !== id; });
   next(null);
 };
+
+module.exports = DumbStorageProvider;

@@ -2,9 +2,10 @@
   "name": "node-webhook-endpoint",
   "version": "0.0.1",
   "description": "SparkPost webhook endpoint convenience module",
-  "main": "webhookendpoint.js",
+  "main": "index.js",
   "scripts": {
-    "test": "mocha test/*/"
+    "test": "mocha test/*/",
+    "coverage": "istanbul cover --report lcov --dir test/reports/unit _mocha test/unit/ test/func -- --reporter xunit-file"
   },
   "keywords": [
     "SparkPost",
@@ -16,7 +17,8 @@
     "chai": "^3.3.0",
     "mocha": "^2.3.3",
     "sinon": "^1.17.1",
-    "sinon-chai": "^2.8.0"
+    "sinon-chai": "^2.8.0",
+    "xunit-file": "0.0.9"
   },
   "dependencies": {
     "q": "^1.4.1"

@@ -12,6 +12,6 @@ Implement readable stream interface
 Optionally strip msys:blah wrapper from each event
 
 Streams version
-  - update tests to expect an object mode readable stream, retire batch objects after use, unshift failed batches to signal need for later re-processing
+  - *update tests to expect an object mode readable stream, retire batch objects after use, unshift failed batches to signal need for later re-processing
   - replace setBatchProcessor() with read() impl
   - impl 3-phase commit for batches

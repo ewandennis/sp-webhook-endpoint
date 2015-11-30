@@ -6,7 +6,7 @@ var http = require('http')
   , chai = require('chai')
   , sinon = require('sinon')
   , sinonChai = require('sinon-chai')
-  , webhooklib = require('../../webhookendpoint')
+  , webhooklib = require('../../')
   , WebhookEndpoint = webhooklib.WebhookEndpoint
   , DumbStorageProvider = webhooklib.DumbStorageProvider
   , expect = chai.expect
@@ -15,16 +15,16 @@ var http = require('http')
 
 chai.use(sinonChai);
 
-function sendJSONRequest(body) {
+function sendJSONRequest(body, options) {
   var deferred = q.defer()
-    , options = {
-    hostname: 'localhost',
-    port: PORT,
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json'
-    }
+    options = options || {};
+
+  options.hostname = 'localhost';
+  options.port = PORT;
+  options.headers = options.headers || {
+    'content-type': 'application/json'
   };
+  options.method = options.method || 'POST';
 
   var req = http.request(options, function(res) {
     var respChunks = [];
@@ -35,7 +35,7 @@ function sendJSONRequest(body) {
 
     res.on('end', function() {
       var respJSON = JSON.parse(Buffer.concat(respChunks).toString('utf8'));
-      deferred.resolve(respJSON);
+      deferred.resolve({json: respJSON, response: res});
     });
   });
 
@@ -44,7 +44,11 @@ function sendJSONRequest(body) {
     deferred.reject(err);
   });
 
-  req.write(JSON.stringify(body));
+  if (typeof body !== 'string') {
+    body = JSON.stringify(body);
+  }
+
+  req.write(body);
   req.end();
 
   return deferred.promise;
@@ -58,7 +62,9 @@ function Cxt() {
   sinon.spy(self.storage, 'storeBatch');
   sinon.stub(self.storage, 'releaseBatch', self.releaseBatch.bind(self));
 
-  self.server = new WebhookEndpoint(self.storage);
+  self.server = new WebhookEndpoint({
+    storageProvider: self.storage
+  });
 }
 
 Cxt.prototype.onBatchStored = function(timeout) {
@@ -110,20 +116,20 @@ Cxt.prototype.waitForBatchRelease = function() {
   return this.waitingForBatchPromise.promise;
 };
 
-function doNothing(batch, next) {
-  next();
+function justRelease(batch, _, next) {
+  batch.release(next);
 }
 
-function throwError(batch, next) {
+function throwError(batch, _, next) {
   next(new Error('Batch processing failed'));
 }
 
 // return a writable stream function that calls fnA the first n times it is written to,
 // then calls fnB.
-function nTimeAthenBConsumer(n, fnA, fnB) {
+function nTimesAThenBConsumer(n, fnA, fnB) {
   var cnt = 0;
   return new stream.Writable({
-    write: sinon.spy(function(chunk, encoding, next) {
+    write: sinon.spy(function(batch, _, next) {
       if (cnt < n) {
         ++cnt;
         return fnA.apply(null, arguments);
@@ -133,16 +139,12 @@ function nTimeAthenBConsumer(n, fnA, fnB) {
   });
 }
 
-function BadBatchConsumer() {
-  return new stream.Writable({
-    write: sinon.spy(throwError)
+function makeBatchConsumer(writefn) {
+  var strm = new stream.Writable({
+    objectMode: true
   });
-}
-
-function NullBatchConsumer() {
-  return new stream.Writable({
-    write: sinon.spy(doNothing)
-  });
+  strm._write = writefn;
+  return strm;
 }
 
 describe('WebhookEndpoint', function() {
@@ -161,64 +163,71 @@ describe('WebhookEndpoint', function() {
     sendJSONRequest(TEST_BATCH).done();
   });
 
+  it('should reject non-POST requests with a 400 code', function(done) {
+    sendJSONRequest(TEST_BATCH, {method: 'GET'}).then(function(result) {
+      expect(result.response.statusCode).to.equal(400);
+      expect(result.json).to.include.key('msg');
+      expect(result.json.msg).to.match(/non-POST/i);
+    }).done(done);
+  });
+
+  it('should reject non-JSON requests with a 400 code', function(done) {
+    sendJSONRequest(TEST_BATCH, { headers: {'content-type': 'text/plain'}}).then(function(result) {
+      expect(result.response.statusCode).to.equal(400);
+      expect(result.json).to.include.key('msg');
+      expect(result.json.msg).to.match(/application\/json/i);
+    }).done(done);
+  });
+  it('should reject malformed JSON with a 400 code', function(done) {
+    sendJSONRequest('{"key: "value"}').then(function(result) {
+      expect(result.response.statusCode).to.equal(400);
+      expect(result.json).to.include.key('msg');
+      expect(result.json.msg).to.match(/malformed/i);
+    }).done(done);
+  });
+
   it('should silently consume webhook pings (empty JSON request bodies)', function(done) {
     sendJSONRequest({}).done(function() { done(); } );
   });
 
-  it('should call its processor function when a legit webhook batch is received', function(done) {
+  it('should pass legit batches downstream on receipt', function(done) {
     var self = this
-      , consumer = NullBatchConsumer();
+      , writeFn = sinon.spy(justRelease)
+      , consumer = makeBatchConsumer(writeFn);
+
+    self.cxt.server.pipe(consumer);
+
+    q.allSettled([
+      sendJSONRequest(TEST_BATCH),
+      self.cxt.onBatchStored(),
+      self.cxt.waitForBatchRelease()]).then(function() {
+        expect(writeFn).to.have.been.calledOnce;
+        expect(writeFn.firstCall.args[0]).to.deep.include.members(TEST_BATCH);
+    }).done(done);
+  });
+
+  it('each legit batch should have a release() method', function(done) {
+    var self = this
+      , writeFn = sinon.spy(justRelease)
+      , consumer = makeBatchConsumer(writeFn);
 
     this.cxt.server.pipe(consumer);
 
     q.allSettled([this.cxt.onBatchStored(), sendJSONRequest(TEST_BATCH)]).then(function() {
-      expect(consumer.write).to.have.been.calledOnce;
+      expect(writeFn.firstCall.args[0]).to.respondTo('release');
     }).done(done);
   });
 
   it('should use storage.storeBatch() to store a batch after receipt but before calling the processor', function(done) {
     var self = this
-      , consumer = NullBatchConsumer();
+      , writeFn = sinon.spy(justRelease)
+      , consumer = makeBatchConsumer(writeFn);
 
     this.cxt.server.pipe(consumer);
 
     q.allSettled([self.cxt.onBatchStored(), sendJSONRequest(TEST_BATCH)]).then(function() {
       expect(self.cxt.storage.storeBatch).to.have.been.called;
-      expect(self.cxt.storage.storeBatch).to.have.been.calledBefore(consumer.write);
-    }).done(done);
-  });
-
-  it('should release a batch if the processor calls next without an error', function(done) {
-    var self = this;
-
-    this.cxt.server.pipe(consumer);
-
-    q.allSettled([self.cxt.onBatchStored(), sendJSONRequest(TEST_BATCH)]).then(function() {
-      expect(self.cxt.storage.releaseBatch).to.have.been.called;
-    }).done(done);
-  });
-
-  it('should not release a batch if the processor calls next with an error', function(done) {
-    var self = this
-      , numFailures = 2
-      , consumer = nTimeAthenBConsumer(numFailures, throwError, doNothing);
-
-    this.cxt.server.pipe(consumer);
-
-    q.allSettled([self.cxt.onBatchStored(), sendJSONRequest(TEST_BATCH)]).then(function() {
-      expect(self.cxt.storage.releaseBatch).not.to.have.been.called;
-    }).done(done);
-  });
-
-  it('should call the processor again with a batch after it fails to dispatch', function(done) {
-    var self = this
-      , numFailures = 2
-      , consumer = nTimeAthenBConsumer(numFailures, throwError, doNothing);
-
-    this.cxt.server.pipe(consumer);
-
-    q.allSettled([sendJSONRequest(TEST_BATCH), self.cxt.waitForBatchRelease()]).then(function() {
-      expect(consumer.write).to.have.callCount(numFailures+1);
+      expect(self.cxt.storage.storeBatch).to.have.been.calledBefore(writeFn);
     }).done(done);
   });
 });

@@ -7,26 +7,56 @@
  */
 
 var http = require('http')
+  , util = require('util')
+  , Readable = require('stream').Readable
   , DumbStorageProvider = require('./dumbstorage');
 
-function WebhookEndpoint(storageProvider) {
-  this.maxRetries = 5;
+
+util.inherits(WebhookEndpoint, Readable);
+
+function WebhookEndpoint(options) {
+  Readable.call(this, {objectMode: true});
+
+  options = options || {};
+
+  this.storage = options.storageProvider || new DumbStorageProvider();
+
+  this.keepReading = false;
+
   this.server = http.createServer(this.receiveBatch.bind(this));
-  this.storage = storageProvider || new DumbStorageProvider();
   this.close = this.server.close.bind(this.server);
+  this.listen = this.server.listen.bind(this.server);
 }
 
-WebhookEndpoint.prototype.listen = function(port, next) {
-  if (!this.hasOwnProperty('processor')) {
-    throw new Error('WebhookEndpoint#listen() called without a (valid) batch processor function.  See WebhookEndpoint#setBatchProcessor() for details.');
-  }
+// Pull batch from storage, wrap it and push it downstream
+WebhookEndpoint.prototype._read = function(_) {
+  var self = this;
 
-  this.server.listen(port, next);
+  this.keepReading = true;
+
+  self.storage.retrieveBatch(function(err, id, batch) {
+    if (err) {
+      // TODO: ?
+      return;
+    }
+
+    if (id && batch) {
+      this.keepReading = self.pushBatch(id, batch);
+    }
+  });
 };
 
-WebhookEndpoint.prototype.setBatchProcessor = function(processor) {
-  this.processor = processor;
-};
+WebhookEndpoint.prototype.pushBatch = function(id, batch) {
+  var self = this;
+  batch.id = id;
+  batch.release = function(next) {
+    if (!next) {
+      throw new Error('release() takes a callback as its argument');
+    }
+    self.storage.releaseBatch(id, next);
+  };
+  return self.push(batch);
+}
 
 WebhookEndpoint.prototype.receiveBatch = function(req, res) {
   var self = this
@@ -46,11 +76,11 @@ WebhookEndpoint.prototype.receiveBatch = function(req, res) {
 
   req.on('end', function() {
     var reqStr = Buffer.concat(reqBlocks).toString('utf8');
-    self.validateAndStoreBatch(reqStr, res);
+    self.validateStoreAndRespond(reqStr, res);
   });
 };
 
-WebhookEndpoint.prototype.validateAndStoreBatch = function(reqStr, res) {
+WebhookEndpoint.prototype.validateStoreAndRespond = function(reqStr, res) {
   var self = this
     , batch;
 
@@ -72,32 +102,10 @@ WebhookEndpoint.prototype.validateAndStoreBatch = function(reqStr, res) {
 
     sendResponse(res, 200, 'ok');
 
-    self.dispatchBatch(batch, batchID, 0);
-  });
-};
-
-WebhookEndpoint.prototype.dispatchBatch = function(batch, batchID, retryCount) {
-  var self = this;
-  self.processor(batch, function(err) {
-    if (err) {
-      ++retryCount;
-      if (retryCount < self.maxRetries) {
-        return setImmediate(self.dispatchBatch.bind(self, batch, batchID, retryCount));
-      } else {
-        var throwme = new Error('Dispatch failure: unable to dispatch batch (batchID=' + batchID + '): ' + err);
-        throwme.name = 'DispatchFailure';
-        throwme.batchID = batchID;
-        throw throwme;
-      }
+    // Push downstream if we have an unanswered _read() call
+    if (self.keepReading) {
+      self.keepReading = self.pushBatch(batchID, batch);
     }
-
-    self.storage.releaseBatch(batchID, function(err) {
-      if (err) {
-        var throwme = new Error('Inconsistent state: unable to release a consumed batch from storage (batchID=' + batchID + '): ' + err);
-        throwme.name = 'InconsistentState';
-        throw throwme;
-      }
-    });
   });
 };
 
@@ -114,5 +122,4 @@ function sendResponse(res, code, msg) {
 
 // ----------------------------------------------------------------------------
 
-exports.WebhookEndpoint = WebhookEndpoint;
-exports.DumbStorageProvider = DumbStorageProvider;
+module.exports = WebhookEndpoint;
