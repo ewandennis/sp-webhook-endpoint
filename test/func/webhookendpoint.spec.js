@@ -54,10 +54,10 @@ function sendJSONRequest(body, options) {
   return deferred.promise;
 }
 
-function Cxt() {
+function Cxt(port, storage, next) {
   var self = this;
 
-  self.storage = new DumbStorageProvider();
+  self.storage = storage || new DumbStorageProvider();
   self.releaseBatchOrig = self.storage.releaseBatch.bind(self.storage);
   sinon.spy(self.storage, 'storeBatch');
   sinon.stub(self.storage, 'releaseBatch', self.releaseBatch.bind(self));
@@ -65,6 +65,8 @@ function Cxt() {
   self.server = new WebhookEndpoint({
     storageProvider: self.storage
   });
+
+  self.server.listen(port, next);
 }
 
 Cxt.prototype.onBatchStored = function(timeout) {
@@ -147,10 +149,9 @@ function makeBatchConsumer(writefn) {
   return strm;
 }
 
-describe('WebhookEndpoint', function() {
+describe('WebhookEndpoint HTTP API', function() {
   beforeEach('Start test endpoint', function(done) {
-    this.cxt = new Cxt();
-    this.cxt.server.listen(PORT, done);
+    this.cxt = new Cxt(PORT, null, done);
   });
 
   afterEach('Stop test endpoint', function(done) {
@@ -178,12 +179,24 @@ describe('WebhookEndpoint', function() {
       expect(result.json.msg).to.match(/application\/json/i);
     }).done(done);
   });
+
   it('should reject malformed JSON with a 400 code', function(done) {
     sendJSONRequest('{"key: "value"}').then(function(result) {
       expect(result.response.statusCode).to.equal(400);
       expect(result.json).to.include.key('msg');
       expect(result.json.msg).to.match(/malformed/i);
     }).done(done);
+  });
+});
+
+describe('WebhookEndpoint batch streaming', function() {
+  beforeEach('Start test endpoint', function(done) {
+    this.cxt = new Cxt(PORT, null, done);
+  });
+
+  afterEach('Stop test endpoint', function(done) {
+    // Ick: async http and batch processing makes the concept of completion hazy
+    this.cxt.server.close(done);
   });
 
   it('should silently consume webhook pings (empty JSON request bodies)', function(done) {
@@ -204,6 +217,17 @@ describe('WebhookEndpoint', function() {
         expect(writeFn).to.have.been.calledOnce;
         expect(writeFn.firstCall.args[0]).to.deep.include.members(TEST_BATCH);
     }).done(done);
+  });
+});
+
+describe('WebhookEndpoint batch storage', function() {
+  beforeEach('Start test endpoint', function(done) {
+    this.cxt = new Cxt(PORT, null, done);
+  });
+
+  afterEach('Stop test endpoint', function(done) {
+    // Ick: async http and batch processing makes the concept of completion hazy
+    this.cxt.server.close(done);
   });
 
   it('each legit batch should have a release() method', function(done) {
@@ -229,5 +253,25 @@ describe('WebhookEndpoint', function() {
       expect(self.cxt.storage.storeBatch).to.have.been.called;
       expect(self.cxt.storage.storeBatch).to.have.been.calledBefore(writeFn);
     }).done(done);
+  });
+
+  it('should push any batches already present at startup', function(done) {
+    var self = this
+      , writeFn = sinon.spy(justRelease)
+      , consumer = makeBatchConsumer(writeFn)
+      , storage = new DumbStorageProvider();
+
+    self.cxt.server.close(function() {
+      storage.storeBatch(TEST_BATCH, function(err) {
+        expect(err).to.be.null;
+        self.cxt = new Cxt(PORT, storage, function() {
+          self.cxt.server.pipe(consumer);
+          self.cxt.waitForBatchRelease().then(function() {
+            expect(writeFn).to.have.been.calledOnce;
+            expect(writeFn.firstCall.args[0]).to.deep.include.members(TEST_BATCH);
+          }).done(done);
+        });
+      });
+    });
   });
 });

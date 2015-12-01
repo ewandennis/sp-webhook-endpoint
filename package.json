@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "mocha test/*/",
-    "coverage": "istanbul cover --report lcov --dir test/reports/unit _mocha test/unit/ test/func -- --reporter xunit-file"
+    "coverage": "istanbul cover --report lcov --dir test/reports/unit _mocha test/unit/ test/func -- --reporter xunit-file",
+    "example": "NODE_PATH=.. node --"
   },
   "keywords": [
     "SparkPost",
@@ -18,9 +19,9 @@
     "mocha": "^2.3.3",
     "sinon": "^1.17.1",
     "sinon-chai": "^2.8.0",
-    "xunit-file": "0.0.9"
+    "xunit-file": "0.0.9",
+    "q": "^1.4.1"
   },
   "dependencies": {
-    "q": "^1.4.1"
   }
 }

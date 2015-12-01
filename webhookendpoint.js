@@ -2,8 +2,8 @@
 
 /*
  * HTTP endpoint intended to safely receive SparkPost webhook requests
- * and make them available to client code for processing.
- *
+ * and make them available to client code for processing as an object mode
+ * readable stream.
  */
 
 var http = require('http')
@@ -14,6 +14,11 @@ var http = require('http')
 
 util.inherits(WebhookEndpoint, Readable);
 
+/*
+ * WebhookEndpoint ctor
+ * options:
+ *    storageProvider: an interface for holding webhook event batches (see DumStorageProvider.js for a sample impl)
+ */
 function WebhookEndpoint(options) {
   Readable.call(this, {objectMode: true});
 
@@ -28,6 +33,7 @@ function WebhookEndpoint(options) {
   this.listen = this.server.listen.bind(this.server);
 }
 
+// Readable stream _read
 // Pull batch from storage, wrap it and push it downstream
 WebhookEndpoint.prototype._read = function(_) {
   var self = this;
@@ -40,8 +46,8 @@ WebhookEndpoint.prototype._read = function(_) {
       return;
     }
 
-    if (id && batch) {
-      this.keepReading = self.pushBatch(id, batch);
+    if (id !== null && batch !== null) {
+      self.keepReading = self.pushBatch(id, batch);
     }
   });
 };
