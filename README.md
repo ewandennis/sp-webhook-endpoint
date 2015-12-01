@@ -4,8 +4,10 @@ This module allows one to safely receive [SparkPost.com](https://www.sparkpost.c
 
 Features include:
 
- - Storage of incoming event batches before issuing 200 response to SparkPost.com
- - Node.JS readable stream interface
+ - Presents a Node.JS readable stream interface
+ - Stores incoming event batches before issuing 200 response to SparkPost.com
+ - Silently consumes the empty requests SparkPost.com sends during webhook registration
+ - Supports a pluggable batch storage interface so you can use your preferred storage medium
 
 ### Usage
 
