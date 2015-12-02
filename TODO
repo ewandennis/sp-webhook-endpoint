@@ -1,17 +1,17 @@
 *Move to a single nominated batch processor function model
 *Retry releasing a batch N times after successful processing
-Handle failed batches on startup
-Handle buildup of failed batches
+*Handle failed batches on startup
+?Handle buildup of failed batches
 Rework client projects
+Add Postgres storage
 Add Mongo storage
 Add Cassandra storage
-Add Postgres storage
 Add filesystem storage
-Use options argument in ctor
-Implement readable stream interface
+*Use options argument in ctor
+*Implement readable stream interface
 Optionally strip msys:blah wrapper from each event
 
 Streams version
   - *update tests to expect an object mode readable stream, retire batch objects after use, unshift failed batches to signal need for later re-processing
   - replace setBatchProcessor() with read() impl
-  - impl 3-phase commit for batches
+  - impl 3-phase commit for batches?
