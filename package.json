@@ -4,9 +4,13 @@
   "description": "SparkPost webhook endpoint convenience module",
   "main": "index.js",
   "scripts": {
+    "initpg": "psql $npm_package_config_pgurl < ddl/pgddl.sql",
     "test": "mocha test/*/",
     "coverage": "istanbul cover --report lcov --dir test/reports/unit _mocha test/unit/ test/func -- --reporter xunit-file",
     "example": "NODE_PATH=.. node --"
+  },
+  "config": {
+    "pgurl": "postgres://localhost/spwebhookendpoint"
   },
   "keywords": [
     "SparkPost",
@@ -14,6 +18,10 @@
   ],
   "author": "Ewan Dennis <ewan.dennis@sparkpost.com>",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ewandennis/sp-webhook-endpoint.git"
+  },
   "devDependencies": {
     "chai": "^3.3.0",
     "mocha": "^2.3.3",
@@ -23,5 +31,6 @@
     "q": "^1.4.1"
   },
   "dependencies": {
+    "pg": "4.4.3"
   }
 }

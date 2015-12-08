@@ -33,23 +33,7 @@ function WebhookEndpoint(options) {
   this.listen = this.server.listen.bind(this.server);
 }
 
-// Readable stream _read
-// Pull batch from storage, wrap it and push it downstream
 WebhookEndpoint.prototype._read = function(_) {
-  var self = this;
-
-  this.keepReading = true;
-
-  self.storage.retrieveBatch(function(err, id, batch) {
-    if (err) {
-      // TODO: ?
-      return;
-    }
-
-    if (id !== null && batch !== null) {
-      self.keepReading = self.pushBatch(id, batch);
-    }
-  });
 };
 
 WebhookEndpoint.prototype.pushBatch = function(id, batch) {
@@ -108,10 +92,7 @@ WebhookEndpoint.prototype.validateStoreAndRespond = function(reqStr, res) {
 
     sendResponse(res, 200, 'ok');
 
-    // Push downstream if we have an unanswered _read() call
-    if (self.keepReading) {
-      self.keepReading = self.pushBatch(batchID, batch);
-    }
+    self.pushBatch(batchID, batch);
   });
 };
 

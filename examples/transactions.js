@@ -1,3 +1,9 @@
+/*
+ * Create a SparkPost webhook endpoint and read event batches as they arrive
+ * from the endpoint stream, paying attention to the order of operations required
+ * to safely consume batches and release them from storage.
+ */
+
 var stream = require('stream')
   , WebhookEndpoint = require('sp-webhook-endpoint').WebhookEndpoint
   , batchConsumer = new stream.Writable({objectMode:true})

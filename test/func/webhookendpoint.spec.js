@@ -98,6 +98,14 @@ Cxt.prototype.releaseBatch = function (batchID, next) {
   var self = this
     , promise = self.waitingForBatchPromise;
 
+  if (self.waitingForN) {
+    --self.waitingForN.n;
+    if (self.waitingForN.n <= 0) {
+      self.waitingForN.p.resolve();
+      self.waitingForN = null;
+    }
+  }
+
   self.waitingForBatchPromise = null;
   self.releaseBatchOrig(batchID, function(err) {
     if (err) {
@@ -107,6 +115,7 @@ Cxt.prototype.releaseBatch = function (batchID, next) {
       return next(err);
     }
     if (promise) {
+      console.log('release');
       promise.resolve();
     }
     next(null);
@@ -116,6 +125,14 @@ Cxt.prototype.releaseBatch = function (batchID, next) {
 Cxt.prototype.waitForBatchRelease = function() {
   this.waitingForBatchPromise = q.defer();
   return this.waitingForBatchPromise.promise;
+};
+
+Cxt.prototype.waitForNBatchReleases = function(n) {
+  this.waitingForN = {
+    p: q.defer(),
+    n: n
+  };
+  return this.waitingForN.p;
 };
 
 function justRelease(batch, _, next) {
@@ -218,6 +235,20 @@ describe('WebhookEndpoint batch streaming', function() {
         expect(writeFn.firstCall.args[0]).to.deep.include.members(TEST_BATCH);
     }).done(done);
   });
+
+  it('should pass 1 batch downstream for each inbound batch', function(done) {
+    var self = this
+      , writeFn = sinon.spy(justRelease)
+      , consumer = makeBatchConsumer(writeFn)
+      , numberOfBatchesToIssue = 3;
+
+    self.cxt.server.pipe(consumer);
+
+    q.allSettled([self.cxt.waitForNBatchReleases(numberOfBatchesToIssue), sendJSONRequest(TEST_BATCH), sendJSONRequest(TEST_BATCH), sendJSONRequest(TEST_BATCH)])
+    .then(function() {
+      expect(writeFn).to.have.callCount(numberOfBatchesToIssue);
+    }).done(done);
+  });
 });
 
 describe('WebhookEndpoint batch storage', function() {
@@ -253,25 +284,5 @@ describe('WebhookEndpoint batch storage', function() {
       expect(self.cxt.storage.storeBatch).to.have.been.called;
       expect(self.cxt.storage.storeBatch).to.have.been.calledBefore(writeFn);
     }).done(done);
-  });
-
-  it('should push any batches already present at startup', function(done) {
-    var self = this
-      , writeFn = sinon.spy(justRelease)
-      , consumer = makeBatchConsumer(writeFn)
-      , storage = new DumbStorageProvider();
-
-    self.cxt.server.close(function() {
-      storage.storeBatch(TEST_BATCH, function(err) {
-        expect(err).to.be.null;
-        self.cxt = new Cxt(PORT, storage, function() {
-          self.cxt.server.pipe(consumer);
-          self.cxt.waitForBatchRelease().then(function() {
-            expect(writeFn).to.have.been.calledOnce;
-            expect(writeFn.firstCall.args[0]).to.deep.include.members(TEST_BATCH);
-          }).done(done);
-        });
-      });
-    });
   });
 });
