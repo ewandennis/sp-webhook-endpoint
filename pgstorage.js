@@ -22,7 +22,7 @@ PgStorageProvider.prototype.storeBatch = function(batch, next) {
   var self = this;
   pg.connect(self.dburl, function(err, client, done) {
     if (err) {
-      return next('While attempting to store a batch, connection failed to db url=' + self.dburl + ': ' + err);
+      return next(new Error('While attempting to store a batch, connection failed to db url=' + self.dburl + ': ' + err));
     }
     client.query('INSERT INTO ' + tblName + ' (batch) VALUES ($1) RETURNING batch_uuid', [JSON.stringify(batch)], function(err, result) {
       if (err) {
@@ -39,7 +39,7 @@ PgStorageProvider.prototype.retrieveBatch = function(next) {
   var self = this;
   pg.connect(self.dburl, function(err, client, done) {
     if (err) {
-      return next('While attempting to retrieve a batch, connection failed to db url=' + self.dburl + ': ' + err);
+      return next(new Error('While attempting to retrieve a batch, connection failed to db url=' + self.dburl + ': ' + err));
     }
     client.query('SELECT * FROM ' + tblName + ' ORDER BY received_at DESC LIMIT 1', function(err, result) {
       if (err) {

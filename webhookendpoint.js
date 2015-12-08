@@ -34,6 +34,19 @@ function WebhookEndpoint(options) {
 }
 
 WebhookEndpoint.prototype._read = function(_) {
+  var self = this;
+
+  self.keepReading = true;
+
+  self.storage.retrieveBatch(function(err, batchid, batch) {
+    if (err) {
+      // TODO: ?
+      return;
+    }
+    if (batchid !== null && batch !== null) {
+      self.keepReading = self.pushBatch(batchid, batch);
+    }
+  });
 };
 
 WebhookEndpoint.prototype.pushBatch = function(id, batch) {
@@ -92,7 +105,9 @@ WebhookEndpoint.prototype.validateStoreAndRespond = function(reqStr, res) {
 
     sendResponse(res, 200, 'ok');
 
-    self.pushBatch(batchID, batch);
+    if (self.keepReading) {
+      self.keepReading = self.pushBatch(batchID, batch);
+    }
   });
 };
 
