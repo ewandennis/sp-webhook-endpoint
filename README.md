@@ -14,7 +14,7 @@ Features include:
 Install the sp-webhook-endpoint module:
 
 ```
-npm install https://github.com/ewandennis/sp-webhook-endpoint.git --save
+npm install ewandennis/sp-webhook-endpoint --save
 ```
 
 Create a WebhookEndpoint instance and pipe it to a writable stream:
