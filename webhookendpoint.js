@@ -18,6 +18,7 @@ util.inherits(WebhookEndpoint, Readable);
  * WebhookEndpoint ctor
  * options:
  *    storageProvider: an interface for holding webhook event batches (see DumStorageProvider.js for a sample impl)
+ *    ignoreNonArrayPayloads: accept and drop non [] payloads? (useful for handling SparkPost webhook events)
  */
 function WebhookEndpoint(options) {
   Readable.call(this, {objectMode: true});
@@ -25,6 +26,11 @@ function WebhookEndpoint(options) {
   options = options || {};
 
   this.storage = options.storageProvider || new DumbStorageProvider();
+  if (options.ignoreNonArrayPayloads !== undefined) {
+    this.ignoreNonArrayPayloads = options.ignoreNonArrayPayloads;
+  } else {
+    this.ignoreNonArrayPayloads = true;
+  }
 
   this.keepReading = false;
 
@@ -94,7 +100,7 @@ WebhookEndpoint.prototype.validateStoreAndRespond = function(reqStr, res) {
     return;
   }
 
-  if (!Array.isArray(batch)) {
+  if (self.ignoreNonArrayPayloads && !Array.isArray(batch)) {
     return sendResponse(res, 200, 'ok');
   }
 

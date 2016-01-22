@@ -54,7 +54,7 @@ function sendJSONRequest(body, options) {
   return deferred.promise;
 }
 
-function Cxt(port, storage, next) {
+function Cxt(port, storage, objectMode, next) {
   var self = this;
 
   self.storage = storage || new DumbStorageProvider();
@@ -63,7 +63,8 @@ function Cxt(port, storage, next) {
   sinon.stub(self.storage, 'releaseBatch', self.releaseBatch.bind(self));
 
   self.server = new WebhookEndpoint({
-    storageProvider: self.storage
+    storageProvider: self.storage,
+    ignoreNonArrayPayloads: objectMode
   });
 
   self.server.listen(port, next);
@@ -168,7 +169,7 @@ function makeBatchConsumer(writefn) {
 
 describe('WebhookEndpoint HTTP API', function() {
   beforeEach('Start test endpoint', function(done) {
-    this.cxt = new Cxt(PORT, null, done);
+    this.cxt = new Cxt(PORT, null, true, done);
   });
 
   afterEach('Stop test endpoint', function(done) {
@@ -206,9 +207,9 @@ describe('WebhookEndpoint HTTP API', function() {
   });
 });
 
-describe('WebhookEndpoint batch streaming', function() {
+describe('WebhookEndpoint batch streaming (array payload mode)', function() {
   beforeEach('Start test endpoint', function(done) {
-    this.cxt = new Cxt(PORT, null, done);
+    this.cxt = new Cxt(PORT, null, true, done);
   });
 
   afterEach('Stop test endpoint', function(done) {
@@ -253,7 +254,7 @@ describe('WebhookEndpoint batch streaming', function() {
 
 describe('WebhookEndpoint batch storage', function() {
   beforeEach('Start test endpoint', function(done) {
-    this.cxt = new Cxt(PORT, null, done);
+    this.cxt = new Cxt(PORT, null, true, done);
   });
 
   afterEach('Stop test endpoint', function(done) {
@@ -283,6 +284,29 @@ describe('WebhookEndpoint batch storage', function() {
     q.allSettled([self.cxt.onBatchStored(), sendJSONRequest(TEST_BATCH)]).then(function() {
       expect(self.cxt.storage.storeBatch).to.have.been.called;
       expect(self.cxt.storage.storeBatch).to.have.been.calledBefore(writeFn);
+    }).done(done);
+  });
+});
+
+describe('WebhookEndpoint batch storage (non-array payload mode)', function() {
+  beforeEach('Start test endpoint', function(done) {
+    this.cxt = new Cxt(PORT, null, false, done);
+  });
+
+  afterEach('Stop test endpoint', function(done) {
+    // Ick: async http and batch processing makes the concept of completion hazy
+    this.cxt.server.close(done);
+  });
+
+  it.only('should store JSON object payloads', function(done) {
+    var self = this
+      , writeFn = sinon.spy(justRelease)
+      , consumer = makeBatchConsumer(writeFn);
+
+    this.cxt.server.pipe(consumer);
+
+    q.allSettled([self.cxt.onBatchStored(), sendJSONRequest({key: "value"})]).then(function() {
+      expect(self.cxt.storage.storeBatch).to.have.been.called;
     }).done(done);
   });
 });
